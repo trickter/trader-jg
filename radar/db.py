@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS listing_records (
   upstream_params_json TEXT NOT NULL,
   UNIQUE(token_id, source, timeframe, observed_at)
 );
+CREATE INDEX IF NOT EXISTS idx_listings_token_source ON listing_records(token_id, source);
 
 CREATE TABLE IF NOT EXISTS aggregate_metrics (
   id INTEGER PRIMARY KEY,
@@ -100,6 +101,7 @@ CREATE TABLE IF NOT EXISTS evaluations (
   checks_json TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_eval_snapshot ON evaluations(snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_eval_token_time ON evaluations(token_id, evaluated_at DESC);
 
 CREATE TABLE IF NOT EXISTS pair_switches (
   id INTEGER PRIMARY KEY,

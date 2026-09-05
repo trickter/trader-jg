@@ -3,7 +3,10 @@ __pycache__/
 .pytest_cache/
 *.py[cod]
 *.egg-info/
+.idea/
 .env
 data/*.db
 data/*.db-shm
 data/*.db-wal
+gmgn_private.pem
+gmgn_public.pem

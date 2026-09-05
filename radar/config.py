@@ -23,6 +23,7 @@ class Settings:
     okx_secret_key: str | None
     okx_passphrase: str | None
     okx_project_id: str | None
+    gmgn_api_key: str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -37,13 +38,14 @@ class Settings:
             port=int(os.getenv("RADAR_PORT", "8000")),
             okx_api_key=os.getenv("OKX_API_KEY") or None,
             okx_secret_key=os.getenv("OKX_SECRET_KEY") or None,
-            okx_passphrase=os.getenv("OKX_API_PASSPHRASE") or None,
+            okx_passphrase=os.getenv("OKX_PASSPHRASE") or os.getenv("OKX_API_PASSPHRASE") or None,
             okx_project_id=os.getenv("OKX_PROJECT_ID") or None,
+            gmgn_api_key=os.getenv("GMGN_API_KEY") or "gmgn_solbscbaseethmonadtron",
         )
 
     @property
     def okx_configured(self) -> bool:
-        return all((self.okx_api_key, self.okx_secret_key, self.okx_passphrase, self.okx_project_id))
+        return all((self.okx_api_key, self.okx_secret_key, self.okx_passphrase))
 
 
 def load_rules(path: Path) -> tuple[dict[str, Any], str]:

@@ -24,7 +24,7 @@ radar = "radar.cli:main"
 packages = ["radar"]
 
 [tool.setuptools.package-data]
-radar = ["static/*"]
+radar = ["static/*", "static/icons/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

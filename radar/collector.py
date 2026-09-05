@@ -9,9 +9,11 @@ import httpx
 
 from .adapters import (
     BINANCE_CHAINS,
+    GMGN_CHAINS,
     OKX_CHAINS,
     BinanceAdapter,
     DexScreenerAdapter,
+    GmgnAdapter,
     OkxAdapter,
     SourceError,
     integer,
@@ -53,6 +55,8 @@ class Collector:
                 self.db.record_listing(token_id, source, timeframe, item["rank"], observed, run_id, params)
                 if source.startswith("okx"):
                     self.db.save_aggregate(token_id, "okx", timeframe or "", observed, item.get("metrics") or {})
+                elif source.startswith("gmgn"):
+                    self.db.save_aggregate(token_id, "gmgn", timeframe or "", observed, item.get("metrics") or {})
             self.db.finish_run(run_id, "success_empty" if not items else "success", len(items))
         except SourceError as exc:
             self.db.finish_run(run_id, "failed", message=str(exc), http_status=exc.status, error_code=exc.code)
@@ -69,15 +73,14 @@ class Collector:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             binance = BinanceAdapter(client)
             okx = OkxAdapter(client, self.settings)
-            dex = DexScreenerAdapter(client)
+            gmgn = GmgnAdapter(client, self.settings)
             jobs = []
             for chain in BINANCE_CHAINS:
                 jobs.append(self._discovery_call(f"binance_alpha_{chain}", "1h", lambda chain=chain: binance.alpha(chain)))
             for chain in OKX_CHAINS:
-                for timeframe in ("1h", "4h"):
-                    jobs.append(self._discovery_call(f"okx_trending_{chain}_{timeframe}", timeframe, lambda chain=chain, timeframe=timeframe: okx.trending(chain, timeframe)))
-            for kind in ("top", "latest"):
-                jobs.append(self._discovery_call(f"dex_boost_{kind}", None, lambda kind=kind: dex.boosts(kind)))
+                jobs.append(self._discovery_call(f"okx_trending_{chain}_4h", "4h", lambda chain=chain: okx.trending(chain, "4h")))
+            for chain in GMGN_CHAINS:
+                jobs.append(self._discovery_call(f"gmgn_trending_{chain}_6h", "6h", lambda chain=chain: gmgn.trending(chain, "6h")))
             await asyncio.gather(*jobs)
 
     @staticmethod
@@ -96,6 +99,25 @@ class Collector:
             "okx_risk_level": integer(data.get("riskLevelControl")),
             "risk_observed_at": observed,
         })
+
+    @staticmethod
+    def _merge_gmgn(snapshot: dict[str, Any], aggregate: tuple[dict[str, Any], str] | None) -> None:
+        if not aggregate:
+            return
+        data, _ = aggregate
+        used_fallback = False
+        for target, source in (
+            ("price_usd", "price"),
+            ("market_cap_usd", "market_cap"),
+            ("liquidity_usd", "liquidity"),
+            ("volume_h6_usd", "volume"),
+            ("tx_h6", "swaps"),
+        ):
+            if snapshot.get(target) is None and (value := number(data.get(source))) is not None:
+                snapshot[target] = integer(value) if target == "tx_h6" else value
+                used_fallback = True
+        if used_fallback:
+            snapshot["data_source"] = "dexscreener+gmgn" if snapshot.get("pair_address") else "gmgn"
 
     async def market(self) -> None:
         config, config_hash = load_rules(self.settings.rules_path)
@@ -119,7 +141,8 @@ class Collector:
                                 base = pair.get("baseToken") or {}
                                 self.db.update_token_metadata(token["id"], base.get("symbol"), base.get("name"), (pair.get("info") or {}).get("imageUrl"))
                             snapshot = normalize_pair(pair, observed)
-                            self._merge_okx(snapshot, self.db.latest_aggregate(token["id"], "okx", "1h"))
+                            self._merge_gmgn(snapshot, self.db.latest_aggregate(token["id"], "gmgn", "6h"))
+                            self._merge_okx(snapshot, self.db.latest_aggregate(token["id"], "okx", "4h"))
                             snapshot_id = self.db.save_snapshot(token["id"], snapshot)
                             result = evaluate(snapshot, config, token["chain"])
                             self.db.save_evaluation(token["id"], snapshot_id, rule_version, result)

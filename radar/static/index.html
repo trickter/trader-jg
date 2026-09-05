@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>热门币雷达</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v=20260905-left-align">
 </head>
 <body>
   <header>
@@ -29,19 +29,53 @@
         <button data-view="archived">已归档</button>
       </div>
       <div class="filters">
-        <select id="chain"><option value="">全部链</option><option value="bsc">BSC</option><option value="solana">Solana</option><option value="robinhood">Robinhood</option></select>
+        <label class="search-box" aria-label="搜索代币名称或合约地址">
+          <span aria-hidden="true">⌕</span>
+          <input id="search" type="search" placeholder="搜索名称或 CA" autocomplete="off">
+        </label>
+        <div class="chain-filter" id="chainFilter" aria-label="按链筛选">
+          <button type="button" data-chain="" class="active">全部</button>
+          <button type="button" data-chain="bsc" title="BSC" aria-label="BSC"><img src="/static/icons/bsc.svg" alt=""></button>
+          <button type="button" data-chain="solana" title="Solana" aria-label="Solana"><img src="/static/icons/solana.svg" alt=""></button>
+          <button type="button" data-chain="robinhood" title="Robinhood Chain" aria-label="Robinhood Chain"><img src="/static/icons/robinhood.jpg" alt=""></button>
+        </div>
         <select id="status"><option value="">PASS + UNKNOWN</option><option>PASS</option><option>UNKNOWN</option><option>REJECT</option></select>
-        <select id="source"><option value="">全部来源</option><option value="binance">Binance Alpha</option><option value="okx">OKX Trending</option><option value="dex_boost">DEX Boost</option></select>
+        <select id="source"><option value="">全部来源</option><option value="binance">Binance Alpha</option><option value="okx">OKX Trending</option><option value="gmgn">GMGN 热榜</option></select>
         <button id="refresh" class="button">刷新</button>
       </div>
     </section>
 
     <section class="panel table-wrap">
       <table>
-        <thead><tr><th>Token</th><th>链</th><th>来源</th><th>价格</th><th>市值</th><th>主池 LP</th><th>1H 成交</th><th>1H Tx</th><th>风险覆盖</th><th>状态</th><th>更新时间</th></tr></thead>
-        <tbody id="rows"><tr><td colspan="11" class="empty">正在加载…</td></tr></tbody>
+        <colgroup>
+          <col class="col-token">
+          <col class="col-price">
+          <col class="col-market-cap">
+          <col class="col-liquidity">
+          <col class="col-volume">
+          <col class="col-tx">
+          <col class="col-risk">
+          <col class="col-status">
+          <col class="col-source">
+        </colgroup>
+        <thead><tr><th>Token</th><th>价格</th><th id="marketCapHeader" aria-sort="none"><button type="button" id="sortMarketCap" class="sort-button" title="按市值排序">市值 <span class="sort-icon" aria-hidden="true">↕</span></button></th><th>主池 LP</th><th>1H 成交</th><th>1H Tx</th><th>风险覆盖</th><th>状态</th><th>来源</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="9" class="empty">正在加载…</td></tr></tbody>
       </table>
     </section>
+    <nav class="pagination" aria-label="候选币分页">
+      <span id="pageSummary">共 0 条 · 第 1 / 1 页</span>
+      <div class="pagination-actions">
+        <label>每页
+          <select id="pageSize" aria-label="每页显示数量">
+            <option value="20">20</option>
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+          </select>
+        </label>
+        <button type="button" id="prevPage" class="ghost">上一页</button>
+        <button type="button" id="nextPage" class="ghost">下一页</button>
+      </div>
+    </nav>
     <p class="disclaimer">PASS 表示基础门槛达标，不代表安全审计通过或出现买点。曲线是定时采样价格，不是完整 K 线。</p>
   </main>
 
@@ -49,6 +83,6 @@
     <button class="close" aria-label="关闭">×</button>
     <div id="detailBody"></div>
   </dialog>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=20260905-periods"></script>
 </body>
 </html>

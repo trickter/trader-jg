@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -18,6 +19,7 @@ TARGET_CHAINS = {"bsc", "solana", "robinhood"}
 BINANCE_CHAINS = {"bsc": "56", "solana": "CT_501"}
 OKX_CHAINS = {"bsc": "56", "solana": "501", "robinhood": "4663"}
 DEX_CHAINS = {"bsc": "bsc", "solana": "solana", "robinhood": "robinhood"}
+GMGN_CHAINS = {"bsc": "bsc", "solana": "sol", "robinhood": "robinhood"}
 
 
 def number(value: Any) -> float | None:
@@ -120,13 +122,15 @@ class OkxAdapter(BaseAdapter):
         timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
         prehash = timestamp + "GET" + path_with_query
         signature = base64.b64encode(hmac.new(self.settings.okx_secret_key.encode(), prehash.encode(), hashlib.sha256).digest()).decode()
-        return {
+        headers = {
             "OK-ACCESS-KEY": self.settings.okx_api_key or "",
             "OK-ACCESS-SIGN": signature,
             "OK-ACCESS-TIMESTAMP": timestamp,
             "OK-ACCESS-PASSPHRASE": self.settings.okx_passphrase or "",
-            "OK-ACCESS-PROJECT": self.settings.okx_project_id or "",
         }
+        if self.settings.okx_project_id:
+            headers["OK-ACCESS-PROJECT"] = self.settings.okx_project_id
+        return headers
 
     async def trending(self, chain: str, timeframe: str) -> tuple[list[dict[str, Any]], dict[str, Any], Any]:
         if not self.settings.okx_configured:
@@ -143,6 +147,55 @@ class OkxAdapter(BaseAdapter):
                 continue
             items.append({"chain": chain, "address": address, "symbol": token.get("tokenSymbol"), "name": None, "logo": token.get("tokenLogoUrl"), "rank": rank, "metrics": token})
         return items, params, payload
+
+
+class GmgnAdapter(BaseAdapter):
+    BASE = "https://openapi.gmgn.ai"
+
+    def __init__(self, client: httpx.AsyncClient, settings: Settings):
+        super().__init__(client)
+        self.settings = settings
+
+    async def trending(self, chain: str, interval: str = "1h") -> tuple[list[dict[str, Any]], dict[str, Any], Any]:
+        params = {
+            "chain": GMGN_CHAINS[chain],
+            "interval": interval,
+            "limit": 20,
+            "order_by": "default",
+            "direction": "desc",
+            "timestamp": int(datetime.now(timezone.utc).timestamp()),
+            "client_id": str(uuid.uuid4()),
+        }
+        payload = await self.json_request(
+            "GET",
+            f"{self.BASE}/v1/market/rank",
+            params=params,
+            headers={"X-APIKEY": self.settings.gmgn_api_key, "User-Agent": "hot-coin-radar/0.1"},
+        )
+        if str(payload.get("code", "0")) not in ("0", "200"):
+            raise SourceError(payload.get("message") or payload.get("msg") or "GMGN business error", code=str(payload.get("code")))
+        data = payload.get("data") or {}
+        if isinstance(data, dict) and isinstance(data.get("data"), dict):
+            if str(data.get("code", "0")) not in ("0", "200"):
+                raise SourceError(data.get("message") or data.get("reason") or "GMGN business error", code=str(data.get("code")))
+            data = data["data"]
+        raw = data.get("rank") or []
+        items = []
+        for position, token in enumerate(raw[:20], 1):
+            address = token.get("address")
+            if not address:
+                continue
+            items.append({
+                "chain": chain,
+                "address": address,
+                "symbol": token.get("symbol"),
+                "name": token.get("name"),
+                "logo": token.get("logo"),
+                "rank": integer(token.get("rank")) or position,
+                "metrics": token,
+            })
+        stored_params = {key: value for key, value in params.items() if key not in ("timestamp", "client_id")}
+        return items, stored_params, payload
 
 
 class DexScreenerAdapter(BaseAdapter):

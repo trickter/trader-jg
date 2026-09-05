@@ -1,6 +1,6 @@
 # 热门币雷达 V1
 
-从 Binance Alpha、OKX Trending 和 DEX Screener Boost 发现 BSC、Solana、Robinhood 热门币，按主池流动性和活跃度过滤，并在掉榜后继续观察 72 小时。程序只读行情，不包含钱包和交易能力。
+从 Binance Alpha 1H、OKX Trending 4H 和 GMGN Trending 6H 发现 BSC、Solana、Robinhood 热门币，按主池流动性和活跃度过滤，并在掉榜后继续观察 72 小时。程序只读行情，不包含钱包和交易能力。
 
 ## 快速启动
 
@@ -19,7 +19,9 @@ chmod +x scripts/start.sh
 ./scripts/start.sh
 ```
 
-浏览器打开 `http://127.0.0.1:8000`。首次启动会创建虚拟环境并安装依赖。没有 OKX 凭据时，Binance 和 DEX Screener 仍会运行，健康页会显示 OKX 未配置。
+浏览器打开 `http://127.0.0.1:8000`。首次启动会创建虚拟环境并安装依赖。没有 OKX 凭据时，Binance 和 GMGN 仍会运行，健康页会显示 OKX 未配置。
+
+GMGN 热榜使用官方 OpenAPI 的 6H 周期（官方没有 4H 热榜周期）。未设置 `GMGN_API_KEY` 时使用官方公开只读 Key；长期运行建议在 `.env` 中配置个人 Key。DexScreener 仅保留为价格、主池流动性、市值和成交数据的行情补全源，不再参与热榜发现；查不到交易对时，以 GMGN 自带的价格、市值和流动性兜底。
 
 ## OKX 配置
 
@@ -29,6 +31,7 @@ chmod +x scripts/start.sh
 OKX_API_KEY=
 OKX_SECRET_KEY=
 OKX_API_PASSPHRASE=
+# 可选：只有 OKX 明确要求时才填写
 OKX_PROJECT_ID=
 ```
 

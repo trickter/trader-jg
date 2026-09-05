@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 from datetime import timedelta
 from pathlib import Path
 from typing import Literal
@@ -23,7 +24,14 @@ app = FastAPI(title="热门币雷达", version="0.1.0")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
-def _candidate_sql(view: str, chain: str | None, status: str | None, source: str | None, include_reject: bool) -> tuple[str, list[object]]:
+def _candidate_filter_parts(
+    view: str,
+    chain: str | None,
+    status: str | None,
+    source: str | None,
+    include_reject: bool,
+    search: str | None = None,
+) -> tuple[str, list[object], str, list[object]]:
     config, _ = load_rules(settings.rules_path)
     now = utcnow()
     current_cutoff = iso(now - timedelta(seconds=int(config.get("discovery_interval_seconds", 300)) * 2))
@@ -48,7 +56,30 @@ def _candidate_sql(view: str, chain: str | None, status: str | None, source: str
     if source:
         clauses.append("EXISTS(SELECT 1 FROM listing_records lr WHERE lr.token_id=t.id AND lr.source LIKE ?)")
         where_args.append(f"%{source}%")
+    if search and (term := search.strip()):
+        clauses.append("(t.symbol LIKE ? COLLATE NOCASE OR t.name LIKE ? COLLATE NOCASE OR t.address LIKE ? COLLATE NOCASE)")
+        pattern = f"%{term}%"
+        where_args.extend((pattern, pattern, pattern))
     where = "WHERE " + " AND ".join(clauses) if clauses else ""
+    return state_expr, [current_cutoff, archive_cutoff], where, where_args
+
+
+def _candidate_sql(
+    view: str,
+    chain: str | None,
+    status: str | None,
+    source: str | None,
+    include_reject: bool,
+    search: str | None = None,
+    sort: str | None = None,
+) -> tuple[str, list[object]]:
+    state_expr, state_args, where, where_args = _candidate_filter_parts(
+        view, chain, status, source, include_reject, search
+    )
+    order = {
+        "market_cap_desc": "s.market_cap_usd IS NULL, s.market_cap_usd DESC, t.last_seen_at DESC",
+        "market_cap_asc": "s.market_cap_usd IS NULL, s.market_cap_usd ASC, t.last_seen_at DESC",
+    }.get(sort, "t.last_seen_at DESC")
     sql = f"""
     SELECT t.*, {state_expr} AS view_state,
       s.id snapshot_id,s.observed_at,s.pair_address,s.dex_id,s.quote_symbol,s.price_usd,s.liquidity_usd,
@@ -60,10 +91,30 @@ def _candidate_sql(view: str, chain: str | None, status: str | None, source: str
     FROM tokens t
     LEFT JOIN market_snapshots s ON s.id=(SELECT id FROM market_snapshots WHERE token_id=t.id ORDER BY observed_at DESC LIMIT 1)
     LEFT JOIN evaluations e ON e.id=(SELECT id FROM evaluations WHERE token_id=t.id ORDER BY evaluated_at DESC LIMIT 1)
-    {where} ORDER BY t.last_seen_at DESC
+    {where} ORDER BY {order}
     """
-    # state expression occurs twice in SQL: SELECT then WHERE
-    return sql, [current_cutoff, archive_cutoff, *where_args]
+    return sql, [*state_args, *where_args]
+
+
+def _candidate_status_sql(
+    view: str,
+    chain: str | None,
+    status: str | None,
+    source: str | None,
+    include_reject: bool,
+    search: str | None = None,
+) -> tuple[str, list[object]]:
+    _, _, where, where_args = _candidate_filter_parts(
+        view, chain, status, source, include_reject, search
+    )
+    sql = f"""
+    SELECT COALESCE(e.status, 'UNKNOWN') status, COUNT(*) count
+    FROM tokens t
+    LEFT JOIN evaluations e ON e.id=(SELECT id FROM evaluations WHERE token_id=t.id ORDER BY evaluated_at DESC LIMIT 1)
+    {where}
+    GROUP BY COALESCE(e.status, 'UNKNOWN')
+    """
+    return sql, where_args
 
 
 def _row(row):
@@ -85,11 +136,32 @@ def candidates(
     chain: Literal["bsc", "solana", "robinhood"] | None = None,
     status: Literal["PASS", "REJECT", "UNKNOWN"] | None = None,
     source: str | None = None,
+    search: str | None = Query(None, max_length=200),
+    sort: Literal["market_cap_asc", "market_cap_desc"] | None = None,
     include_reject: bool = False,
     limit: int = Query(200, ge=1, le=1000),
+    page: int | None = Query(None, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
 ):
-    sql, args = _candidate_sql(view, chain, status, source, include_reject)
+    sql, args = _candidate_sql(view, chain, status, source, include_reject, search, sort)
     with db.connect() as conn:
+        if page is not None:
+            status_sql, status_args = _candidate_status_sql(view, chain, status, source, include_reject, search)
+            status_rows = conn.execute(status_sql, status_args).fetchall()
+            status_counts = {"PASS": 0, "UNKNOWN": 0, "REJECT": 0}
+            status_counts.update({row["status"]: row["count"] for row in status_rows})
+            total = sum(status_counts.values())
+            pages = max(1, math.ceil(total / page_size))
+            page = min(page, pages)
+            rows = conn.execute(sql + " LIMIT ? OFFSET ?", [*args, page_size, (page - 1) * page_size]).fetchall()
+            return {
+                "items": [_row(row) for row in rows],
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "pages": pages,
+                "status_counts": status_counts,
+            }
         rows = conn.execute(sql + " LIMIT ?", [*args, limit]).fetchall()
     return [_row(row) for row in rows]
 
