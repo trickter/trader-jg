@@ -1,0 +1,15 @@
+[Unit]
+Description=Hot Coin Radar web dashboard
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/hot-coin-radar
+EnvironmentFile=/opt/hot-coin-radar/.env
+ExecStart=/opt/hot-coin-radar/.venv/bin/python -m radar serve
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+

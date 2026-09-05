@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>热门币雷达</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">HOT COIN RADAR · V1</p>
+      <h1>热门币雷达</h1>
+      <p class="subtitle">发现热门币，过滤基础风险，保留 72 小时观察轨迹</p>
+    </div>
+    <div class="header-actions">
+      <span id="healthBadge" class="badge muted">检查数据源…</span>
+      <a class="button ghost" href="/api/export.csv?view=active">导出 CSV</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="stats" id="stats"></section>
+    <section class="toolbar panel">
+      <div class="tabs" id="views">
+        <button data-view="active" class="active">观察中</button>
+        <button data-view="current">当前上榜</button>
+        <button data-view="watching">掉榜观察</button>
+        <button data-view="archived">已归档</button>
+      </div>
+      <div class="filters">
+        <select id="chain"><option value="">全部链</option><option value="bsc">BSC</option><option value="solana">Solana</option><option value="robinhood">Robinhood</option></select>
+        <select id="status"><option value="">PASS + UNKNOWN</option><option>PASS</option><option>UNKNOWN</option><option>REJECT</option></select>
+        <select id="source"><option value="">全部来源</option><option value="binance">Binance Alpha</option><option value="okx">OKX Trending</option><option value="dex_boost">DEX Boost</option></select>
+        <button id="refresh" class="button">刷新</button>
+      </div>
+    </section>
+
+    <section class="panel table-wrap">
+      <table>
+        <thead><tr><th>Token</th><th>链</th><th>来源</th><th>价格</th><th>市值</th><th>主池 LP</th><th>1H 成交</th><th>1H Tx</th><th>风险覆盖</th><th>状态</th><th>更新时间</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="11" class="empty">正在加载…</td></tr></tbody>
+      </table>
+    </section>
+    <p class="disclaimer">PASS 表示基础门槛达标，不代表安全审计通过或出现买点。曲线是定时采样价格，不是完整 K 线。</p>
+  </main>
+
+  <dialog id="detail">
+    <button class="close" aria-label="关闭">×</button>
+    <div id="detailBody"></div>
+  </dialog>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+version: 1
+observation_hours: 72
+discovery_interval_seconds: 300
+market_interval_seconds: 60
+raw_retention_days: 7
+snapshot_retention_days: 90
+market_data_max_age_seconds: 180
+risk_data_max_age_seconds: 600
+
+rules:
+  min_liquidity_usd:
+    mode: reject
+    value: 50000
+  min_volume_1h_usd:
+    mode: reject
+    value: 10000
+  min_transactions_1h:
+    mode: reject
+    value: 50
+  max_okx_risk_level:
+    mode: reject
+    value: 3
+    required: false
+
+chain_overrides: {}
+
