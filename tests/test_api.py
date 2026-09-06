@@ -1,5 +1,5 @@
 import importlib
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
@@ -58,3 +58,26 @@ def test_candidate_fuzzy_search_and_market_cap_sort(monkeypatch, tmp_path):
         assert first_page["status_counts"] == {"PASS": 0, "UNKNOWN": 2, "REJECT": 0}
         second_page = client.get("/api/candidates", params={"view": "all", "sort": "market_cap_desc", "page": 2, "page_size": 1}).json()
         assert [row["id"] for row in second_page["items"]] == [small]
+
+
+def test_strategy_candidate_uses_last_720_hour_closes(monkeypatch, tmp_path):
+    monkeypatch.setenv("RADAR_DB_PATH", str(tmp_path / "strategy.db"))
+    import radar.api as api
+    api = importlib.reload(api)
+    now = iso()
+    token_id = api.db.upsert_token("bsc", "0xHigh", "HIGH", "High Token", None, now)
+    api.db.save_snapshot(token_id, {"observed_at": now, "price_usd": 50, "market_cap_usd": 40_000_000})
+    api.db.upsert_qualification(token_id, "VERIFIED", 50_000_000, now, "test", "TEST", 1.0)
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    bars = []
+    for hour in range(721):
+        close = 999 if hour == 0 else 100
+        bars.append({"open_time": iso(start + timedelta(hours=hour)), "open": close, "high": close,
+                     "low": close, "close": close, "volume": 1, "is_closed": 1})
+    api.db.save_ohlcv_bars(token_id, "test", "bsc", "pair", "1h", bars)
+
+    with TestClient(api.app) as client:
+        assert client.get("/research").status_code == 200
+        payload = client.get("/api/strategy/candidates").json()
+    assert payload["items"][0]["window_high"] == 100
+    assert payload["items"][0]["bar_count"] == 720

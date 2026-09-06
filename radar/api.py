@@ -130,6 +130,11 @@ def index():
     return FileResponse(STATIC / "index.html")
 
 
+@app.get("/research")
+def research_page():
+    return FileResponse(STATIC / "research.html")
+
+
 @app.get("/api/candidates")
 def candidates(
     view: Literal["active", "current", "watching", "archived", "all"] = "active",
@@ -227,3 +232,155 @@ def collection_report(days: int = Query(7, ge=1, le=90)):
         for reason in json.loads(row[0]):
             reason_counts[reason] = reason_counts.get(reason, 0) + 1
     return {"days": days, "discoveries": [_row(row) for row in discoveries], "outcomes": [_row(row) for row in outcomes], "risk_coverage": [_row(row) for row in coverage], "filter_reasons": reason_counts, "sources": [_row(row) for row in sources]}
+
+
+@app.get("/api/strategy/candidates")
+def strategy_candidates(
+    chain: Literal["bsc", "solana", "robinhood"] | None = None,
+    qualification: Literal["VERIFIED", "PENDING", "EXCLUDED"] | None = None,
+    signal: Literal["WIN", "LOSS", "TIMEOUT", "OPEN", "AMBIGUOUS", "UNCONFIRMED"] | None = None,
+    search: str | None = Query(None, max_length=200),
+    limit: int = Query(200, ge=1, le=1000),
+):
+    clauses = []
+    args: list[object] = []
+    if chain:
+        clauses.append("t.chain=?")
+        args.append(chain)
+    if qualification:
+        clauses.append("q.status=?")
+        args.append(qualification)
+    if signal:
+        clauses.append("sig.outcome=?")
+        args.append(signal)
+    if search and search.strip():
+        clauses.append("(t.symbol LIKE ? COLLATE NOCASE OR t.name LIKE ? COLLATE NOCASE OR t.address LIKE ? COLLATE NOCASE)")
+        pattern = f"%{search.strip()}%"
+        args.extend((pattern, pattern, pattern))
+    where = "WHERE " + " AND ".join(clauses) if clauses else ""
+    sql = f"""
+    WITH latest_run AS (SELECT MAX(id) id FROM strategy_runs WHERE status='complete'),
+    ranked_bars AS (
+      SELECT token_id,open_time,close,
+        ROW_NUMBER() OVER (PARTITION BY token_id ORDER BY open_time DESC) AS recency
+      FROM ohlcv_bars WHERE timeframe='1h' AND is_closed=1
+    ),
+    bars AS (
+      SELECT token_id,COUNT(*) bar_count,MIN(open_time) bar_start,MAX(open_time) bar_end,MAX(close) window_high
+      FROM ranked_bars WHERE recency<=720 GROUP BY token_id
+    )
+    SELECT t.id,t.chain,t.address,t.symbol,t.name,t.last_seen_at,
+      q.status qualification_status,q.peak_market_cap_usd,q.evidence_at,q.known_at,q.evidence_source,
+      q.reason qualification_reason,q.implied_supply_ratio,
+      snap.price_usd,snap.market_cap_usd,snap.liquidity_usd,snap.volume_h1_usd,snap.observed_at,
+      bars.bar_count,bars.bar_start,bars.bar_end,bars.window_high,
+      sig.id signal_id,sig.level_ratio,sig.level_price,sig.triggered_at,sig.entry_type,sig.entry_price,
+      sig.outcome signal_outcome,sig.net_return,sig.ambiguous
+    FROM tokens t
+    JOIN research_qualifications q ON q.token_id=t.id
+    LEFT JOIN market_snapshots snap ON snap.id=(SELECT id FROM market_snapshots WHERE token_id=t.id ORDER BY observed_at DESC LIMIT 1)
+    LEFT JOIN bars ON bars.token_id=t.id
+    LEFT JOIN strategy_signals sig ON sig.id=(
+      SELECT id FROM strategy_signals WHERE token_id=t.id AND run_id=(SELECT id FROM latest_run)
+      ORDER BY triggered_at DESC,id DESC LIMIT 1
+    )
+    {where}
+    ORDER BY CASE q.status WHEN 'VERIFIED' THEN 0 WHEN 'PENDING' THEN 1 ELSE 2 END,
+      CASE WHEN sig.outcome='OPEN' THEN 0 WHEN sig.entry_time IS NOT NULL THEN 1 WHEN sig.id IS NOT NULL THEN 2 ELSE 3 END,
+      snap.liquidity_usd DESC,t.last_seen_at DESC LIMIT ?
+    """
+    with db.connect() as conn:
+        rows = [dict(row) for row in conn.execute(sql, [*args, limit]).fetchall()]
+    levels = (2 / 3, 1 / 3, 1 / 6)
+    for row in rows:
+        high = row.get("window_high")
+        current = row.get("price_usd")
+        row["price_to_high"] = current / high if current and high else None
+        row["levels"] = {str(round(level, 6)): high * level for level in levels} if high else {}
+    return {"items": rows, "total": len(rows)}
+
+
+@app.get("/api/strategy/candidates/{token_id}")
+def strategy_candidate_detail(token_id: int):
+    with db.connect() as conn:
+        token = conn.execute("SELECT * FROM tokens WHERE id=?", (token_id,)).fetchone()
+        if not token:
+            raise HTTPException(404, "token not found")
+        qualification_row = conn.execute("SELECT * FROM research_qualifications WHERE token_id=?", (token_id,)).fetchone()
+        signals = conn.execute(
+            """SELECT s.*,r.config_hash,r.mode,r.created_at run_created_at FROM strategy_signals s
+            JOIN strategy_runs r ON r.id=s.run_id WHERE s.token_id=? ORDER BY s.triggered_at DESC LIMIT 300""",
+            (token_id,),
+        ).fetchall()
+        coverage = conn.execute(
+            "SELECT COUNT(*) count,MIN(open_time) start,MAX(open_time) end FROM ohlcv_bars WHERE token_id=? AND timeframe='1h'",
+            (token_id,),
+        ).fetchone()
+    return {
+        "token": _row(token),
+        "qualification": _row(qualification_row) if qualification_row else None,
+        "coverage": _row(coverage),
+        "signals": [_row(row) for row in signals],
+    }
+
+
+@app.get("/api/strategy/candidates/{token_id}/candles")
+def strategy_candles(token_id: int, limit: int = Query(1000, ge=1, le=5000), before: str | None = None):
+    clauses = ["token_id=?", "timeframe='1h'"]
+    args: list[object] = [token_id]
+    if before:
+        clauses.append("open_time<?")
+        args.append(before)
+    with db.connect() as conn:
+        exists = conn.execute("SELECT 1 FROM tokens WHERE id=?", (token_id,)).fetchone()
+        if not exists:
+            raise HTTPException(404, "token not found")
+        rows = conn.execute(
+            f"SELECT * FROM ohlcv_bars WHERE {' AND '.join(clauses)} ORDER BY open_time DESC LIMIT ?",
+            [*args, limit],
+        ).fetchall()
+    return list(reversed([_row(row) for row in rows]))
+
+
+@app.get("/api/strategy/runs/{run_id}/report")
+def strategy_run_report(run_id: int):
+    with db.connect() as conn:
+        run = conn.execute("SELECT * FROM strategy_runs WHERE id=?", (run_id,)).fetchone()
+        if not run:
+            raise HTTPException(404, "strategy run not found")
+        groups = conn.execute(
+            """SELECT entry_type,level_ratio,outcome,COUNT(*) count,AVG(net_return) average_return,
+            COUNT(DISTINCT token_id) tokens FROM strategy_signals WHERE run_id=?
+            GROUP BY entry_type,level_ratio,outcome ORDER BY entry_type,level_ratio DESC,outcome""",
+            (run_id,),
+        ).fetchall()
+        total = conn.execute("SELECT COUNT(*) FROM strategy_signals WHERE run_id=?", (run_id,)).fetchone()[0]
+        decided = conn.execute(
+            """SELECT COUNT(*) count,
+            SUM(CASE WHEN outcome='WIN' THEN 1 ELSE 0 END) wins,
+            AVG(CASE WHEN outcome IN ('WIN','LOSS','TIMEOUT') THEN net_return END) average_return
+            FROM strategy_signals WHERE run_id=? AND outcome IN ('WIN','LOSS','TIMEOUT')""",
+            (run_id,),
+        ).fetchone()
+    summary = _row(decided)
+    summary["win_rate"] = summary["wins"] / summary["count"] if summary["count"] else None
+    return {"run": _row(run), "total": total, "summary": summary, "groups": [_row(row) for row in groups]}
+
+
+@app.get("/api/strategy/health")
+def strategy_health():
+    with db.connect() as conn:
+        qualifications = conn.execute("SELECT status,COUNT(*) count FROM research_qualifications GROUP BY status").fetchall()
+        bars = conn.execute("SELECT chain,COUNT(*) bars,COUNT(DISTINCT token_id) tokens,MAX(open_time) latest FROM ohlcv_bars GROUP BY chain").fetchall()
+        jobs = conn.execute(
+            """SELECT j.status,COUNT(*) count FROM backfill_jobs j
+            JOIN (SELECT token_id,source,timeframe,MAX(id) id FROM backfill_jobs GROUP BY token_id,source,timeframe) latest
+              ON latest.id=j.id GROUP BY j.status"""
+        ).fetchall()
+        latest_run = conn.execute("SELECT * FROM strategy_runs ORDER BY id DESC LIMIT 1").fetchone()
+    return {
+        "qualifications": [_row(row) for row in qualifications],
+        "ohlcv": [_row(row) for row in bars],
+        "backfill_jobs": [_row(row) for row in jobs],
+        "latest_run": _row(latest_run) if latest_run else None,
+    }

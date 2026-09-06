@@ -225,6 +225,53 @@ class DexScreenerAdapter(BaseAdapter):
         return result, payload
 
 
+class GeckoTerminalAdapter(BaseAdapter):
+    BASE = "https://api.geckoterminal.com/api/v2"
+
+    async def ohlcv(self, chain: str, pair_address: str, token_address: str,
+                    before_timestamp: int, limit: int = 1000) -> tuple[list[dict[str, Any]], Any]:
+        payload = await self.json_request(
+            "GET",
+            f"{self.BASE}/networks/{DEX_CHAINS[chain]}/pools/{pair_address}/ohlcv/hour",
+            params={
+                "aggregate": 1,
+                "limit": min(1000, max(1, limit)),
+                "currency": "usd",
+                "token": "base",
+                "before_timestamp": before_timestamp,
+            },
+        )
+        base = (payload.get("meta") or {}).get("base") or {}
+        actual = str(base.get("address") or "")
+        expected = token_address if chain == "solana" else token_address.lower()
+        comparable = actual if chain == "solana" else actual.lower()
+        if comparable != expected:
+            raise SourceError("OHLCV pool base token does not match candidate", code="IDENTITY_MISMATCH")
+        bars = []
+        for item in ((payload.get("data") or {}).get("attributes") or {}).get("ohlcv_list") or []:
+            if len(item) != 6:
+                continue
+            timestamp, open_, high, low, close, volume = item
+            values = [number(value) for value in (open_, high, low, close, volume)]
+            if any(value is None for value in values):
+                continue
+            open_value, high_value, low_value, close_value, volume_value = values
+            if timestamp >= before_timestamp or open_value <= 0 or low_value <= 0 or volume_value < 0:
+                continue
+            if high_value < max(open_value, close_value) or low_value > min(open_value, close_value):
+                continue
+            bars.append({
+                "open_time": datetime.fromtimestamp(int(timestamp), timezone.utc).isoformat(),
+                "open": open_value,
+                "high": high_value,
+                "low": low_value,
+                "close": close_value,
+                "volume": volume_value,
+                "is_closed": True,
+            })
+        return sorted(bars, key=lambda bar: bar["open_time"]), payload
+
+
 def primary_pair(pairs: list[dict[str, Any]]) -> dict[str, Any] | None:
     valid = [pair for pair in pairs if pair.get("pairAddress") and number((pair.get("liquidity") or {}).get("usd")) is not None]
     return max(valid, key=lambda pair: number((pair.get("liquidity") or {}).get("usd")) or -1) if valid else None

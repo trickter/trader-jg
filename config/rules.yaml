@@ -6,6 +6,7 @@ raw_retention_days: 7
 snapshot_retention_days: 90
 market_data_max_age_seconds: 180
 risk_data_max_age_seconds: 600
+aggregate_data_max_age_seconds: 600
 
 rules:
   min_liquidity_usd:
@@ -24,3 +25,15 @@ rules:
 
 chain_overrides: {}
 
+strategy:
+  market_cap_threshold_usd: 30000000
+  supply_change_tolerance: 0.20
+  levels: [0.6666666667, 0.3333333333, 0.1666666667]
+  lookback_hours: 720
+  min_history_hours: 24
+  confirmation_hours: 24
+  confirmation_breakout_bars: 3
+  take_profit: 0.25
+  stop_loss: 0.25
+  holding_hours: 168
+  round_trip_cost: 0.01

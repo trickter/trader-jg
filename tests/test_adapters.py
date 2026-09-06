@@ -1,6 +1,6 @@
 import httpx
 
-from radar.adapters import BinanceAdapter, GmgnAdapter
+from radar.adapters import BinanceAdapter, GeckoTerminalAdapter, GmgnAdapter, SourceError
 from radar.config import Settings
 
 
@@ -52,3 +52,34 @@ async def test_gmgn_trending_uses_openapi_auth_and_normalizes_rank(monkeypatch):
     assert items == [{"chain": "solana", "address": "SoLAddress", "symbol": "HOT", "name": "Hot Token", "logo": "https://img.example/hot.png", "rank": 3, "metrics": payload["data"]["data"]["rank"][0]}]
     assert "timestamp" not in params and "client_id" not in params
     assert raw == payload
+
+
+async def test_geckoterminal_ohlcv_validates_base_token_and_sorts_bars():
+    payload = {
+        "meta": {"base": {"address": "0xABC"}},
+        "data": {"attributes": {"ohlcv_list": [
+            [200, 2, 3, 1, 2.5, 20],
+            [100, 1, 2, .5, 1.5, 10],
+            [300, 3, 4, 2, 3.5, 30],
+        ]}},
+    }
+
+    def handler(request: httpx.Request):
+        assert request.url.path == "/api/v2/networks/bsc/pools/pair/ohlcv/hour"
+        assert request.url.params["token"] == "base"
+        return httpx.Response(200, json=payload)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        bars, _ = await GeckoTerminalAdapter(client).ohlcv("bsc", "pair", "0xabc", 300)
+    assert [bar["close"] for bar in bars] == [1.5, 2.5]
+
+
+async def test_geckoterminal_rejects_pool_identity_mismatch():
+    payload = {"meta": {"base": {"address": "wrong"}}, "data": {"attributes": {"ohlcv_list": []}}}
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload))) as client:
+        try:
+            await GeckoTerminalAdapter(client).ohlcv("solana", "pair", "expected", 300)
+        except SourceError as exc:
+            assert exc.code == "IDENTITY_MISMATCH"
+        else:
+            raise AssertionError("identity mismatch must fail closed")

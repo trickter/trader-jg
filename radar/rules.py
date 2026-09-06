@@ -62,7 +62,10 @@ def evaluate(snapshot: dict[str, Any], config: dict[str, Any], chain: str, now: 
         status = "UNKNOWN"
     else:
         status = "PASS"
-    risk_fields = [snapshot.get(name) for name in ("okx_risk_level", "okx_top10_percent", "okx_dev_percent", "okx_insider_percent", "okx_bundle_percent")]
-    present = sum(value is not None and value != 0 for value in risk_fields)
+    risk_fields = ("okx_risk_level", "okx_top10_percent", "okx_dev_percent", "okx_insider_percent", "okx_bundle_percent")
+    present = sum(
+        snapshot.get(name) is not None and not (name == "okx_risk_level" and snapshot.get(name) == 0)
+        for name in risk_fields
+    )
     coverage = "complete" if present == len(risk_fields) and risk_fresh else "partial" if present and risk_fresh else "missing"
     return {"status": status, "risk_coverage": coverage, "reasons": hard_failures + missing_required + warnings, "checks": checks}

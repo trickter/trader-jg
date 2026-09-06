@@ -55,8 +55,26 @@ class Collector:
                 self.db.record_listing(token_id, source, timeframe, item["rank"], observed, run_id, params)
                 if source.startswith("okx"):
                     self.db.save_aggregate(token_id, "okx", timeframe or "", observed, item.get("metrics") or {})
+                    metrics = item.get("metrics") or {}
+                    self.db.save_normalized_metrics(token_id, "okx", timeframe or "", observed, {
+                        "unique_traders": integer(metrics.get("uniqueTraders")),
+                        "net_inflow_usd": number(metrics.get("inflowUsd")),
+                        "risk_level": integer(metrics.get("riskLevelControl")),
+                        "top10_percent": number(metrics.get("top10HoldPercent")),
+                        "dev_percent": number(metrics.get("devHoldPercent")),
+                        "insider_percent": number(metrics.get("insiderHoldPercent")),
+                        "bundle_percent": number(metrics.get("bundleHoldPercent")),
+                    })
                 elif source.startswith("gmgn"):
                     self.db.save_aggregate(token_id, "gmgn", timeframe or "", observed, item.get("metrics") or {})
+                    metrics = item.get("metrics") or {}
+                    self.db.save_normalized_metrics(token_id, "gmgn", timeframe or "", observed, {
+                        "price_usd": number(metrics.get("price")),
+                        "market_cap_usd": number(metrics.get("market_cap")),
+                        "liquidity_usd": number(metrics.get("liquidity")),
+                        "volume_usd": number(metrics.get("volume")),
+                        "transactions": integer(metrics.get("swaps")),
+                    })
             self.db.finish_run(run_id, "success_empty" if not items else "success", len(items))
         except SourceError as exc:
             self.db.finish_run(run_id, "failed", message=str(exc), http_status=exc.status, error_code=exc.code)
@@ -90,8 +108,6 @@ class Collector:
         data, observed = aggregate
         snapshot.update({
             "okx_first_trade_at": millis_to_iso(data.get("firstTradeTime")),
-            "okx_unique_traders_h1": integer(data.get("uniqueTraders")),
-            "okx_net_inflow_h1": number(data.get("inflowUsd")),
             "okx_top10_percent": number(data.get("top10HoldPercent")),
             "okx_dev_percent": number(data.get("devHoldPercent")),
             "okx_insider_percent": number(data.get("insiderHoldPercent")),
@@ -101,10 +117,19 @@ class Collector:
         })
 
     @staticmethod
-    def _merge_gmgn(snapshot: dict[str, Any], aggregate: tuple[dict[str, Any], str] | None) -> None:
+    def _merge_gmgn(snapshot: dict[str, Any], aggregate: tuple[dict[str, Any], str] | None,
+                    max_age_seconds: int = 600) -> None:
         if not aggregate:
             return
-        data, _ = aggregate
+        data, observed = aggregate
+        try:
+            observed_time = datetime.fromisoformat(observed.replace("Z", "+00:00"))
+            snapshot_time = datetime.fromisoformat(snapshot["observed_at"].replace("Z", "+00:00"))
+        except (KeyError, ValueError):
+            return
+        age = (snapshot_time - observed_time).total_seconds()
+        if age < 0 or age > max_age_seconds:
+            return
         used_fallback = False
         for target, source in (
             ("price_usd", "price"),
@@ -122,7 +147,7 @@ class Collector:
     async def market(self) -> None:
         config, config_hash = load_rules(self.settings.rules_path)
         rule_version = self.db.rule_version(config_hash, config)
-        tokens = self.db.active_tokens(int(config.get("observation_hours", 72)))
+        tokens = self.db.tracked_tokens(int(config.get("observation_hours", 72)))
         timeout = httpx.Timeout(15)
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             dex = DexScreenerAdapter(client)
@@ -141,7 +166,8 @@ class Collector:
                                 base = pair.get("baseToken") or {}
                                 self.db.update_token_metadata(token["id"], base.get("symbol"), base.get("name"), (pair.get("info") or {}).get("imageUrl"))
                             snapshot = normalize_pair(pair, observed)
-                            self._merge_gmgn(snapshot, self.db.latest_aggregate(token["id"], "gmgn", "6h"))
+                            self._merge_gmgn(snapshot, self.db.latest_aggregate(token["id"], "gmgn", "6h"),
+                                             int(config.get("aggregate_data_max_age_seconds", 600)))
                             self._merge_okx(snapshot, self.db.latest_aggregate(token["id"], "okx", "4h"))
                             snapshot_id = self.db.save_snapshot(token["id"], snapshot)
                             result = evaluate(snapshot, config, token["chain"])

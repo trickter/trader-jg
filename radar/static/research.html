@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>高市值代币回调研究</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260906-research">
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">PULLBACK RESEARCH · PAPER ONLY</p>
+      <h1>高市值代币回调研究</h1>
+      <p class="subtitle">曾达到 3000 万美元市值 · 2/3、1/3、1/6 价格回调 · +25% / -25% 七日观察</p>
+    </div>
+    <div class="header-actions">
+      <span id="researchHealth" class="badge muted">检查研究数据…</span>
+      <a class="button ghost" href="/">返回热榜</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="stats" id="researchStats"></section>
+    <section class="toolbar panel research-toolbar">
+      <div class="filters">
+        <label class="search-box" aria-label="搜索代币">
+          <span aria-hidden="true">⌕</span>
+          <input id="researchSearch" type="search" placeholder="搜索名称或 CA" autocomplete="off">
+        </label>
+        <select id="researchChain"><option value="">全部链</option><option value="bsc">BSC</option><option value="solana">Solana</option><option value="robinhood">Robinhood</option></select>
+        <select id="qualification"><option value="">全部资格</option><option value="VERIFIED">已验证</option><option value="PENDING">待核验</option><option value="EXCLUDED">已排除</option></select>
+        <select id="signal"><option value="">全部结果</option><option value="OPEN">观察中</option><option value="WIN">成功</option><option value="LOSS">失败</option><option value="TIMEOUT">到期</option><option value="AMBIGUOUS">顺序不明</option><option value="UNCONFIRMED">未确认</option></select>
+        <button id="researchRefresh" class="button">刷新</button>
+      </div>
+      <span class="muted research-note">榜单仅展示已有市值证据的代币；待核验项不进入回放。</span>
+    </section>
+
+    <section class="panel table-wrap">
+      <table class="research-table">
+        <thead><tr><th>Token</th><th>资格</th><th>历史峰值市值</th><th>现价 / 前高</th><th>最近回调层</th><th>回放结果</th><th>主池 LP</th><th>小时线覆盖</th></tr></thead>
+        <tbody id="researchRows"><tr><td colspan="8" class="empty">正在加载…</td></tr></tbody>
+      </table>
+    </section>
+    <p class="disclaimer">这是研究和纸面回放工具，不会连接钱包或自动下单。同一小时同时触及止盈、止损时记为“顺序不明”，不计入胜率。</p>
+  </main>
+
+  <dialog id="researchDetail">
+    <button class="close" aria-label="关闭">×</button>
+    <div id="researchDetailBody"></div>
+  </dialog>
+  <script src="/static/research.js?v=20260906"></script>
+</body>
+</html>

@@ -47,6 +47,14 @@ def test_gmgn_six_hour_metrics_fill_missing_market_data_without_overwriting_dex(
     assert snapshot["data_source"] == "gmgn"
 
 
+def test_stale_gmgn_aggregate_does_not_fill_current_snapshot():
+    snapshot = {"observed_at": iso(), "data_source": "dexscreener"}
+    stale = iso(utcnow() - timedelta(hours=1))
+    Collector._merge_gmgn(snapshot, ({"price": 2, "market_cap": 300}, stale), max_age_seconds=600)
+    assert "price_usd" not in snapshot
+    assert "market_cap_usd" not in snapshot
+
+
 def test_pair_switch_is_recorded(tmp_path):
     db = Database(tmp_path / "test.db")
     db.initialize()
